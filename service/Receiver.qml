@@ -24,7 +24,14 @@ Item {
   property string payloadLabel: ""
 
   readonly property bool choosing: chooserProcess.running
-  readonly property bool busy: choosing || rpcProcess.running
+  readonly property bool busy: {
+    if (choosing) return true
+    if (_currentRpc && String(_currentRpc.kind || "") !== "snapshot") return true
+    for (var i = 0; i < _rpcQueue.length; i++) {
+      if (_rpcQueue[i] && String(_rpcQueue[i].kind || "") !== "snapshot") return true
+    }
+    return false
+  }
   readonly property int onlineDeviceCount: {
     var count = 0
     for (var i = 0; i < devices.length; i++) if (devices[i] && devices[i].online === true) count++
