@@ -705,9 +705,40 @@ Panel {
     readonly property bool active: root.isTransferActive(transfer)
     readonly property real progress: root.transferProgress(transfer)
     readonly property bool failed: transfer && String(transfer.state || "") === "failed"
+    readonly property var paths: root.localsend ? root.localsend.transferPaths(transfer) : []
+    readonly property bool openable: paths.length > 0
 
     foreground: root.foreground
+    // This panel carries no keyboard cursor, so a received row owns its own
+    // hover paint. Only one row can hold the pointer, which is the single
+    // highlight CursorSurface exists to draw.
+    hasCursor: openable && rowMouse.containsMouse
     implicitHeight: transferBody.implicitHeight + Style.space(16)
+
+    // Declared before the row content so the cancel button sitting on top of
+    // it keeps its own clicks.
+    MouseArea {
+      id: rowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: transferRow.openable
+      acceptedButtons: Qt.LeftButton
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: function(mouse) {
+        if (!root.localsend || !transferRow.transfer) return
+        if (mouse.modifiers & Qt.AltModifier) root.localsend.revealTransfer(transferRow.transfer)
+        else root.localsend.openTransfer(transferRow.transfer)
+        root.close()
+      }
+
+      PanelToolTip {
+        visible: transferRow.openable && rowMouse.containsMouse
+        text: transferRow.paths.length > 1
+          ? "Open the folder  /  Alt+click to select the files in it"
+          : "Open the file  /  Alt+click to show it in its folder"
+        fontFamily: root.fontFamily
+      }
+    }
 
     Column {
       id: transferBody

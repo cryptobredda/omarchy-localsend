@@ -86,6 +86,116 @@ Item {
     return parts.length > 0 ? parts[parts.length - 1] : String(path || "")
   }
 
+  function parentDirectory(path) {
+    var value = String(path || "")
+    var cut = value.lastIndexOf("/")
+    if (cut < 0) return ""
+    return cut === 0 ? "/" : value.substring(0, cut)
+  }
+
+  // Deepest directory that holds every one of these files: the destination
+  // itself for a plain file drop, the received folder for a folder send.
+  function commonDirectory(paths) {
+    var common = null
+    for (var i = 0; i < paths.length; i++) {
+      var parts = parentDirectory(paths[i]).split("/")
+      if (common === null) {
+        common = parts
+        continue
+      }
+      var limit = Math.min(common.length, parts.length)
+      var shared = 0
+      while (shared < limit && common[shared] === parts[shared]) shared++
+      common = common.slice(0, shared)
+    }
+    if (common === null || common.length === 0) return ""
+    var joined = common.join("/")
+    return joined === "" ? "/" : joined
+  }
+
+  // Local paths for the files a transfer actually wrote. Only received files
+  // have one: the controller drops the source path once a send finishes, and
+  // received clipboard text never reaches the destination folder.
+  function transferPaths(transfer) {
+    var paths = []
+    if (!transfer || String(transfer.direction || "") !== "incoming") return paths
+    var files = transfer.files instanceof Array ? transfer.files : []
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i]
+      if (!file || String(file.state || "") !== "completed") continue
+      var path = String(file.destinationPath || "")
+      if (path !== "" && paths.indexOf(path) < 0) paths.push(path)
+    }
+    return paths
+  }
+
+  // Every command below is handed to `bash -lc`, because that is how the shell
+  // runs a notification's click action. File names arrive from the sending
+  // device, so each path goes through shellQuote on the way in.
+  function shellQuote(value) {
+    return "'" + String(value === undefined || value === null ? "" : value).replace(/'/g, "'\\''") + "'"
+  }
+
+  function fileUri(path) {
+    var parts = String(path || "").split("/")
+    for (var i = 0; i < parts.length; i++) parts[i] = encodeURIComponent(parts[i]).replace(/'/g, "%27")
+    return "file://" + parts.join("/")
+  }
+
+  function openCommand(path) {
+    var quoted = shellQuote(path)
+    return "uwsm-app -- gio open " + quoted + " || uwsm-app -- xdg-open " + quoted
+  }
+
+  // org.freedesktop.FileManager1 is the portable "show this file in its
+  // folder" call: Nautilus, Dolphin, Thunar and Nemo all export it. Opening
+  // the plain folder is the fallback when nothing on the bus answers.
+  function revealCommand(paths) {
+    var folder = commonDirectory(paths)
+    if (paths.length === 0) return folder === "" ? "" : openCommand(folder)
+    var uris = []
+    for (var i = 0; i < paths.length; i++) uris.push('"' + fileUri(paths[i]) + '"')
+    var call = "gdbus call --session"
+      + " --dest org.freedesktop.FileManager1"
+      + " --object-path /org/freedesktop/FileManager1"
+      + " --method org.freedesktop.FileManager1.ShowItems "
+      + shellQuote("[" + uris.join(",") + "]")
+      + " '\"\"' >/dev/null 2>&1"
+    return folder === "" ? call : call + " || " + openCommand(folder)
+  }
+
+  function runCommand(command) {
+    if (String(command || "") === "") return
+    Quickshell.execDetached(["bash", "-lc", String(command)])
+  }
+
+  // One received file opens in whichever application claims it; anything else
+  // opens the folder it landed in, since there is no single file to mean.
+  function openTransfer(transfer) {
+    var paths = transferPaths(transfer)
+    if (paths.length === 1) {
+      runCommand(openCommand(paths[0]))
+      return
+    }
+    var folder = commonDirectory(paths)
+    if (folder === "") {
+      lastError = "Nothing to open for that transfer"
+      actionStatusTimer.restart()
+      return
+    }
+    runCommand(openCommand(folder))
+  }
+
+  function revealTransfer(transfer) {
+    var command = revealCommand(transferPaths(transfer))
+    if (command === "") {
+      lastError = "Nothing to open for that transfer"
+      actionStatusTimer.restart()
+      return
+    }
+    runCommand(command)
+  }
+
   function startDaemon() {
     if (controllerPath === "" || daemonProcess.running) return
     _intentionalStop = false
