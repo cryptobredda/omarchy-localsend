@@ -216,12 +216,10 @@ Panel {
           }
 
           Text {
-            visible: root.localsend && (root.localsend.actionStatus !== "" || root.localsend.lastError !== "")
+            visible: root.localsend && root.localsend.lastError !== ""
             width: parent.width
-            text: root.localsend
-              ? (root.localsend.actionStatus !== "" ? root.localsend.actionStatus : root.localsend.lastError)
-              : ""
-            color: root.localsend && root.localsend.actionStatus !== "" ? root.dim : root.urgent
+            text: root.localsend ? root.localsend.lastError : ""
+            color: root.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
@@ -341,7 +339,9 @@ Panel {
             }
           }
 
+          // The toast rides this one, centred on the rule.
           DividerLane {
+            id: statusLane
             padAbove: incomingBlock.visible ? 0 : Style.space(15)
             padBelow: Style.space(7)
           }
@@ -533,6 +533,46 @@ Panel {
             elide: Text.ElideMiddle
             textFormat: Text.PlainText
           }
+        }
+      }
+
+      // Confirmations float over the content: inline they added a line, which
+      // resized the panel and shoved every row down as they came and went.
+      BorderSurface {
+        id: statusToast
+
+        // `message` lags `status` by design: it holds the last real message so
+        // the toast still reads correctly while it fades out.
+        property string status: root.localsend ? root.localsend.actionStatus : ""
+        property string message: ""
+
+        onStatusChanged: if (status !== "") message = status
+
+        // Centred on the divider, which is why the lane around it is tall
+        // enough to hold this. Clamped so a scrolled panel still shows it.
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.max(Style.space(6), statusLane.y + statusLane.lead - height / 2 - panelFlick.contentY)
+        implicitWidth: Math.min(statusLabel.implicitWidth + Style.space(24), keyCatcher.width - Style.space(24))
+        implicitHeight: statusLabel.implicitHeight + Style.space(14)
+        radius: Style.cornerRadius
+        color: Color.tooltip.background
+        borderSpec: Border.flat(Color.tooltip.border, Style.normalBorderWidth)
+        opacity: status !== "" ? 1.0 : 0.0
+        visible: opacity > 0
+
+        Behavior on opacity { NumberAnimation { duration: 130; easing.type: Easing.OutQuad } }
+
+        Text {
+          id: statusLabel
+          anchors.centerIn: parent
+          width: Math.min(implicitWidth, keyCatcher.width - Style.space(48))
+          horizontalAlignment: Text.AlignHCenter
+          text: statusToast.message
+          color: Color.tooltip.text
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          elide: Text.ElideRight
+          textFormat: Text.PlainText
         }
       }
     }
