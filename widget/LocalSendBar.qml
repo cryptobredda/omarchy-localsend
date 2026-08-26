@@ -31,6 +31,8 @@ Panel {
     }
     return list
   }
+  // Air between a rule and the content on either side of it, everywhere.
+  readonly property real dividerGap: Style.space(30)
   readonly property var visibleTransfers: {
     if (!localsend || !(localsend.transfers instanceof Array)) return []
     return localsend.transfers.slice(0, 6)
@@ -214,12 +216,10 @@ Panel {
           }
 
           Text {
-            visible: root.localsend && (root.localsend.actionStatus !== "" || root.localsend.lastError !== "")
+            visible: root.localsend && root.localsend.lastError !== ""
             width: parent.width
-            text: root.localsend
-              ? (root.localsend.actionStatus !== "" ? root.localsend.actionStatus : root.localsend.lastError)
-              : ""
-            color: root.localsend && root.localsend.actionStatus !== "" ? root.dim : root.urgent
+            text: root.localsend ? root.localsend.lastError : ""
+            color: root.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
@@ -227,6 +227,7 @@ Panel {
           }
 
           Column {
+            id: incomingBlock
             visible: root.localsend && root.localsend.incoming !== null
             width: parent.width
             spacing: Style.space(8)
@@ -338,8 +339,11 @@ Panel {
             }
           }
 
-          PanelSeparator {
-            foreground: root.foreground
+          // The toast rides this one, centred on the rule.
+          DividerLane {
+            id: statusLane
+            padAbove: incomingBlock.visible ? 0 : Style.space(15)
+            padBelow: Style.space(7)
           }
 
           Column {
@@ -441,8 +445,9 @@ Panel {
             }
           }
 
-          PanelSeparator {
-            foreground: root.foreground
+          DividerLane {
+            padAbove: Style.space(6)
+            padBelow: Style.space(6)
           }
 
           Column {
@@ -484,9 +489,10 @@ Panel {
             }
           }
 
-          PanelSeparator {
+          DividerLane {
             visible: root.visibleTransfers.length > 0
-            foreground: root.foreground
+            padAbove: Style.space(17)
+            padBelow: Style.space(6)
           }
 
           Column {
@@ -529,6 +535,67 @@ Panel {
           }
         }
       }
+
+      // Confirmations float over the content: inline they added a line, which
+      // resized the panel and shoved every row down as they came and went.
+      BorderSurface {
+        id: statusToast
+
+        // `message` lags `status` by design: it holds the last real message so
+        // the toast still reads correctly while it fades out.
+        property string status: root.localsend ? root.localsend.actionStatus : ""
+        property string message: ""
+
+        onStatusChanged: if (status !== "") message = status
+
+        // Centred on the divider, which is why the lane around it is tall
+        // enough to hold this. Clamped so a scrolled panel still shows it.
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: Math.max(Style.space(6), statusLane.y + statusLane.lead - height / 2 - panelFlick.contentY)
+        implicitWidth: Math.min(statusLabel.implicitWidth + Style.space(24), keyCatcher.width - Style.space(24))
+        implicitHeight: statusLabel.implicitHeight + Style.space(14)
+        radius: Style.cornerRadius
+        color: Color.tooltip.background
+        borderSpec: Border.flat(Color.tooltip.border, Style.normalBorderWidth)
+        opacity: status !== "" ? 1.0 : 0.0
+        visible: opacity > 0
+
+        Behavior on opacity { NumberAnimation { duration: 130; easing.type: Easing.OutQuad } }
+
+        Text {
+          id: statusLabel
+          anchors.centerIn: parent
+          width: Math.min(implicitWidth, keyCatcher.width - Style.space(48))
+          horizontalAlignment: Text.AlignHCenter
+          text: statusToast.message
+          color: Color.tooltip.text
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          elide: Text.ElideRight
+          textFormat: Text.PlainText
+        }
+      }
+    }
+  }
+
+  // Even air on both sides of a rule. Each neighbour brings its own internal
+  // padding — the hero's is deep, a device row's deeper still — so a lane is
+  // told what its neighbours already contribute and makes up only the
+  // difference. The pads are measured from rendered output and scale with
+  // Style.space, as the padding they answer to does.
+  component DividerLane: Item {
+    property real padAbove: 0
+    property real padBelow: 0
+
+    readonly property real lead: Math.max(0, root.dividerGap - contentColumn.spacing - padAbove)
+    readonly property real trail: Math.max(0, root.dividerGap - contentColumn.spacing - padBelow)
+
+    width: parent ? parent.width : 0
+    height: lead + trail
+
+    PanelSeparator {
+      y: parent.lead
+      foreground: root.foreground
     }
   }
 
