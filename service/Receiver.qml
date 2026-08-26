@@ -52,19 +52,28 @@ Item {
   property string _chooserOutput: ""
   property string _chooserError: ""
   property var _notifiedRequests: ({})
+  property var _notifiedTransfers: ({})
+  property var _messages: ({})
+  property string _messagesKeys: ""
+  property bool _receivedPrimed: false
+  property string _transfersJson: ""
 
   function concise(text) {
     var value = String(text || "").replace(/\s+/g, " ").trim()
     return value.length > 180 ? value.substring(0, 177) + "..." : value
   }
 
-  function safeRemote(text) {
-    return String(text || "Unknown device")
+  function safeText(text) {
+    return String(text || "")
       .replace(/[\u0000-\u001f\u007f]/g, " ")
       .replace(/[<>&]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .substring(0, 120)
+  }
+
+  function safeRemote(text) {
+    return safeText(text) || "Unknown device"
   }
 
   function formatBytes(value) {
@@ -83,6 +92,170 @@ Item {
   function baseName(path) {
     var parts = String(path || "").split("/")
     return parts.length > 0 ? parts[parts.length - 1] : String(path || "")
+  }
+
+  function parentDirectory(path) {
+    var value = String(path || "")
+    var cut = value.lastIndexOf("/")
+    if (cut < 0) return ""
+    return cut === 0 ? "/" : value.substring(0, cut)
+  }
+
+  // Deepest directory that holds every one of these files: the destination
+  // itself for a plain file drop, the received folder for a folder send.
+  function commonDirectory(paths) {
+    var common = null
+    for (var i = 0; i < paths.length; i++) {
+      var parts = parentDirectory(paths[i]).split("/")
+      if (common === null) {
+        common = parts
+        continue
+      }
+      var limit = Math.min(common.length, parts.length)
+      var shared = 0
+      while (shared < limit && common[shared] === parts[shared]) shared++
+      common = common.slice(0, shared)
+    }
+    if (common === null || common.length === 0) return ""
+    var joined = common.join("/")
+    return joined === "" ? "/" : joined
+  }
+
+  // Received clipboard text never reaches the destination folder, and the
+  // controller only carries it on the pending request: once the request
+  // becomes a transfer record the text is gone from the snapshot. Keep it
+  // here, keyed by request id, which is also the transfer's id. The same pass
+  // drops entries whose transfer has aged out of the controller's list.
+  function rememberMessages() {
+    var next = ({})
+    var keep = ({})
+    for (var i = 0; i < transfers.length; i++) {
+      if (transfers[i] && transfers[i].id) keep[String(transfers[i].id)] = true
+    }
+    if (incoming && incoming.id) keep[String(incoming.id)] = true
+    for (var key in _messages) if (keep[key]) next[key] = _messages[key]
+    if (incoming && incoming.id && incoming.messagePreview !== null && incoming.messagePreview !== undefined) {
+      next[String(incoming.id)] = {
+        text: String(incoming.messagePreview),
+        truncated: incoming.messagePreviewTruncated === true
+      }
+    }
+    var ids = []
+    for (var id in next) ids.push(id)
+    ids.sort()
+    var encoded = ids.join("\n")
+    if (encoded !== _messagesKeys) {
+      _messagesKeys = encoded
+      _messages = next
+    }
+  }
+
+  // The text a completed transfer put on the clipboard, or null when the
+  // transfer was files. Declined and cancelled requests never reached the
+  // clipboard, so they report nothing.
+  function transferMessage(transfer) {
+    if (!transfer || String(transfer.direction || "") !== "incoming") return null
+    if (String(transfer.state || "") !== "completed") return null
+    var entry = _messages[String(transfer.id || "")]
+    return entry ? entry : null
+  }
+
+  function copyMessage(transfer) {
+    var message = transferMessage(transfer)
+    if (!message) return
+    if (message.truncated === true) {
+      lastError = "That text was too long to keep — send it again to copy it"
+      actionStatus = ""
+      actionStatusTimer.restart()
+      return
+    }
+    Quickshell.execDetached(["bash", "-c", "printf %s " + shellQuote(message.text) + " | wl-copy"])
+    lastError = ""
+    actionStatus = "Copied to the clipboard"
+    actionStatusTimer.restart()
+  }
+
+  // Local paths for the files a transfer actually wrote. Only received files
+  // have one: the controller drops the source path once a send finishes, and
+  // received clipboard text never reaches the destination folder.
+  function transferPaths(transfer) {
+    var paths = []
+    if (!transfer || String(transfer.direction || "") !== "incoming") return paths
+    var files = transfer.files instanceof Array ? transfer.files : []
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i]
+      if (!file || String(file.state || "") !== "completed") continue
+      var path = String(file.destinationPath || "")
+      if (path !== "" && paths.indexOf(path) < 0) paths.push(path)
+    }
+    return paths
+  }
+
+  // Every command below is handed to `bash -lc`, because that is how the shell
+  // runs a notification's click action. File names arrive from the sending
+  // device, so each path goes through shellQuote on the way in.
+  function shellQuote(value) {
+    return "'" + String(value === undefined || value === null ? "" : value).replace(/'/g, "'\\''") + "'"
+  }
+
+  function fileUri(path) {
+    var parts = String(path || "").split("/")
+    for (var i = 0; i < parts.length; i++) parts[i] = encodeURIComponent(parts[i]).replace(/'/g, "%27")
+    return "file://" + parts.join("/")
+  }
+
+  function openCommand(path) {
+    var quoted = shellQuote(path)
+    return "uwsm-app -- gio open " + quoted + " || uwsm-app -- xdg-open " + quoted
+  }
+
+  // org.freedesktop.FileManager1 is the portable "show this file in its
+  // folder" call: Nautilus, Dolphin, Thunar and Nemo all export it. Opening
+  // the plain folder is the fallback when nothing on the bus answers.
+  function revealCommand(paths) {
+    var folder = commonDirectory(paths)
+    if (paths.length === 0) return folder === "" ? "" : openCommand(folder)
+    var uris = []
+    for (var i = 0; i < paths.length; i++) uris.push('"' + fileUri(paths[i]) + '"')
+    var call = "gdbus call --session"
+      + " --dest org.freedesktop.FileManager1"
+      + " --object-path /org/freedesktop/FileManager1"
+      + " --method org.freedesktop.FileManager1.ShowItems "
+      + shellQuote("[" + uris.join(",") + "]")
+      + " '\"\"' >/dev/null 2>&1"
+    return folder === "" ? call : call + " || " + openCommand(folder)
+  }
+
+  function runCommand(command) {
+    if (String(command || "") === "") return
+    Quickshell.execDetached(["bash", "-lc", String(command)])
+  }
+
+  // One received file opens in whichever application claims it; anything else
+  // opens the folder it landed in, since there is no single file to mean.
+  function openTransfer(transfer) {
+    var paths = transferPaths(transfer)
+    if (paths.length === 1) {
+      runCommand(openCommand(paths[0]))
+      return
+    }
+    var folder = commonDirectory(paths)
+    if (folder === "") {
+      lastError = "Nothing to open for that transfer"
+      actionStatusTimer.restart()
+      return
+    }
+    runCommand(openCommand(folder))
+  }
+
+  function revealTransfer(transfer) {
+    var command = revealCommand(transferPaths(transfer))
+    if (command === "") {
+      lastError = "Nothing to open for that transfer"
+      actionStatusTimer.restart()
+      return
+    }
+    runCommand(command)
   }
 
   function startDaemon() {
@@ -228,11 +401,20 @@ Item {
     daemon = snapshot.daemon
     devices = snapshot.devices
     incoming = snapshot.incoming || null
-    transfers = snapshot.transfers
+    // Hand the list on only when something in it actually moved: replacing the
+    // array rebuilds every row in the panel, which would drop the hover state
+    // and tooltip under the pointer on each poll.
+    var encoded = JSON.stringify(snapshot.transfers)
+    if (encoded !== _transfersJson) {
+      _transfersJson = encoded
+      transfers = snapshot.transfers
+    }
     ready = String(snapshot.daemon.status || "") === "running"
     phase = ready ? "running" : String(snapshot.daemon.status || "unavailable")
     if (snapshot.error && snapshot.error.message) lastError = concise(snapshot.error.message)
     if (incoming && incoming.id && String(incoming.id) !== previousRequest) notifyIncoming(incoming)
+    rememberMessages()
+    reviewReceived()
   }
 
   function notifyIncoming(request) {
@@ -255,6 +437,51 @@ Item {
       "--exec", "omarchy-shell -q shell summon bredda.localsend",
       "Incoming LocalSend request",
       body
+    ])
+  }
+
+  // Announce each finished download once. The first snapshot of a run only
+  // seeds the set: whatever the daemon still lists as recent was announced by
+  // the run that received it.
+  function reviewReceived() {
+    var seeding = !_receivedPrimed
+    _receivedPrimed = true
+    var next = null
+    for (var i = 0; i < transfers.length; i++) {
+      var transfer = transfers[i]
+      if (!transfer || String(transfer.direction || "") !== "incoming") continue
+      if (String(transfer.state || "") !== "completed") continue
+      var id = String(transfer.id || "")
+      if (id === "" || _notifiedTransfers[id]) continue
+      if (next === null) {
+        next = ({})
+        for (var key in _notifiedTransfers) next[key] = _notifiedTransfers[key]
+      }
+      next[id] = true
+      if (!seeding) notifyReceived(transfer)
+    }
+    if (next !== null) _notifiedTransfers = next
+  }
+
+  function notifyReceived(transfer) {
+    var paths = transferPaths(transfer)
+    if (paths.length === 0) return
+    var folder = commonDirectory(paths)
+    if (folder === "") return
+    var files = transfer.files instanceof Array ? transfer.files : []
+    var count = Number(transfer.fileCount || files.length || 0)
+    var headline = count === 1
+      ? safeText(baseName(paths[0]))
+      : count + (count === 1 ? " file" : " files")
+    if (headline === "") headline = "files"
+    Quickshell.execDetached([
+      "omarchy-notification-send",
+      "--app-name", "LocalSend",
+      "--urgency", "normal",
+      "--glyph", "󰇚",
+      "--exec", openCommand(folder),
+      "Received " + headline,
+      formatBytes(transfer.totalBytes) + " from " + safeRemote(transfer.peer && transfer.peer.alias)
     ])
   }
 

@@ -66,6 +66,12 @@ Panel {
 
   function transferTitle(transfer) {
     if (!transfer) return "Transfer"
+    // Clipboard text arrives as a file named after a random uuid; the text
+    // itself is the only useful label.
+    var message = localsend ? localsend.transferMessage(transfer) : null
+    // Only the head of the text can ever be on screen: the row elides long
+    // before this, and the full text stays in the service for copying.
+    if (message) return localsend.concise(String(message.text).substring(0, 200))
     var files = transfer.files instanceof Array ? transfer.files : []
     var count = Number(transfer.fileCount || files.length || 0)
     if (count === 1 && files.length > 0) return String(files[0].name || "1 item")
@@ -705,9 +711,48 @@ Panel {
     readonly property bool active: root.isTransferActive(transfer)
     readonly property real progress: root.transferProgress(transfer)
     readonly property bool failed: transfer && String(transfer.state || "") === "failed"
+    readonly property var paths: root.localsend ? root.localsend.transferPaths(transfer) : []
+    readonly property var message: root.localsend ? root.localsend.transferMessage(transfer) : null
+    readonly property bool openable: paths.length > 0
+    readonly property bool actionable: openable || !!message
 
     foreground: root.foreground
+    // This panel carries no keyboard cursor, so a received row owns its own
+    // hover paint. Only one row can hold the pointer, which is the single
+    // highlight CursorSurface exists to draw.
+    hasCursor: actionable && rowMouse.containsMouse
     implicitHeight: transferBody.implicitHeight + Style.space(16)
+
+    // Declared before the row content so the cancel button sitting on top of
+    // it keeps its own clicks.
+    MouseArea {
+      id: rowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: transferRow.actionable
+      acceptedButtons: Qt.LeftButton
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: function(mouse) {
+        if (!root.localsend || !transferRow.transfer) return
+        if (transferRow.message) {
+          root.localsend.copyMessage(transferRow.transfer)
+          return
+        }
+        if (mouse.modifiers & Qt.AltModifier) root.localsend.revealTransfer(transferRow.transfer)
+        else root.localsend.openTransfer(transferRow.transfer)
+        root.close()
+      }
+
+      PanelToolTip {
+        visible: transferRow.actionable && rowMouse.containsMouse
+        text: transferRow.message
+          ? "Copy this text to the clipboard again"
+          : (transferRow.paths.length > 1
+            ? "Open the folder  /  Alt+click to select the files in it"
+            : "Open the file  /  Alt+click to show it in its folder")
+        fontFamily: root.fontFamily
+      }
+    }
 
     Column {
       id: transferBody
@@ -739,7 +784,7 @@ Panel {
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
-            elide: Text.ElideMiddle
+            elide: transferRow.message ? Text.ElideRight : Text.ElideMiddle
             textFormat: Text.PlainText
           }
 
