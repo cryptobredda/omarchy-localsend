@@ -52,6 +52,8 @@ Item {
   property string _chooserOutput: ""
   property string _chooserError: ""
   property var _notifiedRequests: ({})
+  property var _notifiedTransfers: ({})
+  property bool _receivedPrimed: false
   property string _transfersJson: ""
 
   function concise(text) {
@@ -59,13 +61,17 @@ Item {
     return value.length > 180 ? value.substring(0, 177) + "..." : value
   }
 
-  function safeRemote(text) {
-    return String(text || "Unknown device")
+  function safeText(text) {
+    return String(text || "")
       .replace(/[\u0000-\u001f\u007f]/g, " ")
       .replace(/[<>&]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .substring(0, 120)
+  }
+
+  function safeRemote(text) {
+    return safeText(text) || "Unknown device"
   }
 
   function formatBytes(value) {
@@ -351,6 +357,7 @@ Item {
     phase = ready ? "running" : String(snapshot.daemon.status || "unavailable")
     if (snapshot.error && snapshot.error.message) lastError = concise(snapshot.error.message)
     if (incoming && incoming.id && String(incoming.id) !== previousRequest) notifyIncoming(incoming)
+    reviewReceived()
   }
 
   function notifyIncoming(request) {
@@ -373,6 +380,51 @@ Item {
       "--exec", "omarchy-shell -q shell summon bredda.localsend",
       "Incoming LocalSend request",
       body
+    ])
+  }
+
+  // Announce each finished download once. The first snapshot of a run only
+  // seeds the set: whatever the daemon still lists as recent was announced by
+  // the run that received it.
+  function reviewReceived() {
+    var seeding = !_receivedPrimed
+    _receivedPrimed = true
+    var next = null
+    for (var i = 0; i < transfers.length; i++) {
+      var transfer = transfers[i]
+      if (!transfer || String(transfer.direction || "") !== "incoming") continue
+      if (String(transfer.state || "") !== "completed") continue
+      var id = String(transfer.id || "")
+      if (id === "" || _notifiedTransfers[id]) continue
+      if (next === null) {
+        next = ({})
+        for (var key in _notifiedTransfers) next[key] = _notifiedTransfers[key]
+      }
+      next[id] = true
+      if (!seeding) notifyReceived(transfer)
+    }
+    if (next !== null) _notifiedTransfers = next
+  }
+
+  function notifyReceived(transfer) {
+    var paths = transferPaths(transfer)
+    if (paths.length === 0) return
+    var folder = commonDirectory(paths)
+    if (folder === "") return
+    var files = transfer.files instanceof Array ? transfer.files : []
+    var count = Number(transfer.fileCount || files.length || 0)
+    var headline = count === 1
+      ? safeText(baseName(paths[0]))
+      : count + (count === 1 ? " file" : " files")
+    if (headline === "") headline = "files"
+    Quickshell.execDetached([
+      "omarchy-notification-send",
+      "--app-name", "LocalSend",
+      "--urgency", "normal",
+      "--glyph", "󰇚",
+      "--exec", openCommand(folder),
+      "Received " + headline,
+      formatBytes(transfer.totalBytes) + " from " + safeRemote(transfer.peer && transfer.peer.alias)
     ])
   }
 
