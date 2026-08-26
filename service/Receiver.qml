@@ -52,6 +52,7 @@ Item {
   property string _chooserOutput: ""
   property string _chooserError: ""
   property var _notifiedRequests: ({})
+  property string _transfersJson: ""
 
   function concise(text) {
     var value = String(text || "").replace(/\s+/g, " ").trim()
@@ -228,7 +229,14 @@ Item {
     daemon = snapshot.daemon
     devices = snapshot.devices
     incoming = snapshot.incoming || null
-    transfers = snapshot.transfers
+    // Hand the list on only when something in it actually moved: replacing the
+    // array rebuilds every row in the panel, which would drop the hover state
+    // and tooltip under the pointer on each poll.
+    var encoded = JSON.stringify(snapshot.transfers)
+    if (encoded !== _transfersJson) {
+      _transfersJson = encoded
+      transfers = snapshot.transfers
+    }
     ready = String(snapshot.daemon.status || "") === "running"
     phase = ready ? "running" : String(snapshot.daemon.status || "unavailable")
     if (snapshot.error && snapshot.error.message) lastError = concise(snapshot.error.message)
