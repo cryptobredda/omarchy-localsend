@@ -385,7 +385,7 @@ Item {
 
   Timer {
     id: pollTimer
-    interval: root.incoming || root.hasActiveTransfer ? 450 : 1500
+    interval: root.hasActiveTransfer ? 450 : 1500
     repeat: true
     running: root.ready
     triggeredOnStart: true
