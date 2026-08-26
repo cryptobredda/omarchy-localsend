@@ -31,6 +31,8 @@ Panel {
     }
     return list
   }
+  // Air between a rule and the content on either side of it, everywhere.
+  readonly property real dividerGap: Style.space(30)
   readonly property var visibleTransfers: {
     if (!localsend || !(localsend.transfers instanceof Array)) return []
     return localsend.transfers.slice(0, 6)
@@ -227,6 +229,7 @@ Panel {
           }
 
           Column {
+            id: incomingBlock
             visible: root.localsend && root.localsend.incoming !== null
             width: parent.width
             spacing: Style.space(8)
@@ -338,8 +341,9 @@ Panel {
             }
           }
 
-          PanelSeparator {
-            foreground: root.foreground
+          DividerLane {
+            padAbove: incomingBlock.visible ? 0 : Style.space(15)
+            padBelow: Style.space(7)
           }
 
           Column {
@@ -441,8 +445,9 @@ Panel {
             }
           }
 
-          PanelSeparator {
-            foreground: root.foreground
+          DividerLane {
+            padAbove: Style.space(6)
+            padBelow: Style.space(6)
           }
 
           Column {
@@ -484,9 +489,10 @@ Panel {
             }
           }
 
-          PanelSeparator {
+          DividerLane {
             visible: root.visibleTransfers.length > 0
-            foreground: root.foreground
+            padAbove: Style.space(17)
+            padBelow: Style.space(6)
           }
 
           Column {
@@ -529,6 +535,27 @@ Panel {
           }
         }
       }
+    }
+  }
+
+  // Even air on both sides of a rule. Each neighbour brings its own internal
+  // padding — the hero's is deep, a device row's deeper still — so a lane is
+  // told what its neighbours already contribute and makes up only the
+  // difference. The pads are measured from rendered output and scale with
+  // Style.space, as the padding they answer to does.
+  component DividerLane: Item {
+    property real padAbove: 0
+    property real padBelow: 0
+
+    readonly property real lead: Math.max(0, root.dividerGap - contentColumn.spacing - padAbove)
+    readonly property real trail: Math.max(0, root.dividerGap - contentColumn.spacing - padBelow)
+
+    width: parent ? parent.width : 0
+    height: lead + trail
+
+    PanelSeparator {
+      y: parent.lead
+      foreground: root.foreground
     }
   }
 
