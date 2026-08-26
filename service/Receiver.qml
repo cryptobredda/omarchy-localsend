@@ -53,6 +53,8 @@ Item {
   property string _chooserError: ""
   property var _notifiedRequests: ({})
   property var _notifiedTransfers: ({})
+  property var _messages: ({})
+  property string _messagesKeys: ""
   property bool _receivedPrimed: false
   property string _transfersJson: ""
 
@@ -117,6 +119,60 @@ Item {
     if (common === null || common.length === 0) return ""
     var joined = common.join("/")
     return joined === "" ? "/" : joined
+  }
+
+  // Received clipboard text never reaches the destination folder, and the
+  // controller only carries it on the pending request: once the request
+  // becomes a transfer record the text is gone from the snapshot. Keep it
+  // here, keyed by request id, which is also the transfer's id. The same pass
+  // drops entries whose transfer has aged out of the controller's list.
+  function rememberMessages() {
+    var next = ({})
+    var keep = ({})
+    for (var i = 0; i < transfers.length; i++) {
+      if (transfers[i] && transfers[i].id) keep[String(transfers[i].id)] = true
+    }
+    if (incoming && incoming.id) keep[String(incoming.id)] = true
+    for (var key in _messages) if (keep[key]) next[key] = _messages[key]
+    if (incoming && incoming.id && incoming.messagePreview !== null && incoming.messagePreview !== undefined) {
+      next[String(incoming.id)] = {
+        text: String(incoming.messagePreview),
+        truncated: incoming.messagePreviewTruncated === true
+      }
+    }
+    var ids = []
+    for (var id in next) ids.push(id)
+    ids.sort()
+    var encoded = ids.join("\n")
+    if (encoded !== _messagesKeys) {
+      _messagesKeys = encoded
+      _messages = next
+    }
+  }
+
+  // The text a completed transfer put on the clipboard, or null when the
+  // transfer was files. Declined and cancelled requests never reached the
+  // clipboard, so they report nothing.
+  function transferMessage(transfer) {
+    if (!transfer || String(transfer.direction || "") !== "incoming") return null
+    if (String(transfer.state || "") !== "completed") return null
+    var entry = _messages[String(transfer.id || "")]
+    return entry ? entry : null
+  }
+
+  function copyMessage(transfer) {
+    var message = transferMessage(transfer)
+    if (!message) return
+    if (message.truncated === true) {
+      lastError = "That text was too long to keep — send it again to copy it"
+      actionStatus = ""
+      actionStatusTimer.restart()
+      return
+    }
+    Quickshell.execDetached(["bash", "-c", "printf %s " + shellQuote(message.text) + " | wl-copy"])
+    lastError = ""
+    actionStatus = "Copied to the clipboard"
+    actionStatusTimer.restart()
   }
 
   // Local paths for the files a transfer actually wrote. Only received files
@@ -357,6 +413,7 @@ Item {
     phase = ready ? "running" : String(snapshot.daemon.status || "unavailable")
     if (snapshot.error && snapshot.error.message) lastError = concise(snapshot.error.message)
     if (incoming && incoming.id && String(incoming.id) !== previousRequest) notifyIncoming(incoming)
+    rememberMessages()
     reviewReceived()
   }
 
