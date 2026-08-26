@@ -58,13 +58,41 @@ Item {
     return value.length > 180 ? value.substring(0, 177) + "..." : value
   }
 
-  function safeRemote(text) {
-    return String(text || "Unknown device")
+  function safeText(text) {
+    return String(text || "")
       .replace(/[\u0000-\u001f\u007f]/g, " ")
       .replace(/[<>&]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .substring(0, 120)
+  }
+
+  function safeRemote(text) {
+    return safeText(text) || "Unknown device"
+  }
+
+  // Sending a folder puts its path in every offered name, so a shared leading
+  // component means the sender picked a folder rather than loose files.
+  function offeredFolder(files) {
+    var first = String(files[0].name || "")
+    var cut = first.indexOf("/")
+    if (cut <= 0) return ""
+    var folder = first.substring(0, cut)
+    for (var i = 1; i < files.length; i++) {
+      if (String(files[i].name || "").indexOf(folder + "/") !== 0) return ""
+    }
+    return folder
+  }
+
+  // Name what an offer actually holds. A lone file and a folder both have a
+  // name worth deciding on; a pile of unrelated files does not, so it stays a
+  // count rather than singling one of them out.
+  function offeredLabel(files) {
+    if (!(files instanceof Array) || files.length === 0) return ""
+    if (files.length === 1) return safeText(files[0].name)
+    var folder = offeredFolder(files)
+    if (folder !== "") return safeText(folder) + " (" + files.length + " files)"
+    return files.length + " files"
   }
 
   function formatBytes(value) {
@@ -243,10 +271,9 @@ Item {
     next[id] = true
     _notifiedRequests = next
     var sender = safeRemote(request.sender && request.sender.alias)
-    var count = request.files instanceof Array ? request.files.length : 0
     var body = request.messagePreview !== null && request.messagePreview !== undefined
       ? "Clipboard text from " + sender
-      : formatBytes(request.totalBytes) + " in " + count + (count === 1 ? " file" : " files") + " from " + sender
+      : offeredLabel(request.files) + "  —  " + formatBytes(request.totalBytes) + " from " + sender
     Quickshell.execDetached([
       "omarchy-notification-send",
       "--app-name", "LocalSend",

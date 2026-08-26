@@ -64,6 +64,14 @@ Panel {
     return value.toUpperCase()
   }
 
+  function incomingSummary(request) {
+    if (!request || !localsend) return ""
+    if (request.messagePreview !== null && request.messagePreview !== undefined) return "Wants to share clipboard text"
+    var label = localsend.offeredLabel(request.files)
+    var size = localsend.formatBytes(request.totalBytes)
+    return label === "" ? size : label + "  /  " + size
+  }
+
   function transferTitle(transfer) {
     if (!transfer) return "Transfer"
     var files = transfer.files instanceof Array ? transfer.files : []
@@ -285,16 +293,12 @@ Panel {
                       Layout.fillWidth: true
                       text: {
                         if (!root.localsend || !root.localsend.incoming) return ""
-                        var request = root.localsend.incoming
-                        var files = request.files instanceof Array ? request.files.length : 0
-                        return request.messagePreview !== null && request.messagePreview !== undefined
-                          ? "Wants to share clipboard text"
-                          : files + (files === 1 ? " file" : " files") + "  /  " + root.localsend.formatBytes(request.totalBytes)
+                        return root.incomingSummary(root.localsend.incoming)
                       }
                       color: root.dim
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
+                      elide: Text.ElideMiddle
                       textFormat: Text.PlainText
                     }
                   }
