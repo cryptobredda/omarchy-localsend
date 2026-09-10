@@ -8,7 +8,13 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
+  readonly property string sourceDir: {
+    if (manifest && manifest.__sourceDir) return String(manifest.__sourceDir)
+    var here = String(Qt.resolvedUrl(".."))
+    if (here.indexOf("file://") === 0) here = here.substring(7)
+    try { here = decodeURIComponent(here) } catch (e) {}
+    return here.replace(/\/+$/, "")
+  }
   readonly property string controllerPath: sourceDir === "" ? "" : sourceDir + "/bin/localsend-controller"
 
   property bool ready: false
