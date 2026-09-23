@@ -8,7 +8,11 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
+  // Omarchy 4 strips manifest.__sourceDir before handing the manifest to third-party
+  // plugins, so reading it here always returns undefined and the daemon never starts.
+  // Resolve the plugin's source directory from the component URL of this QML file.
+  // The QML lives under service/ but bin/ lives at the plugin root, so strip one level.
+  readonly property string sourceDir: String(Qt.resolvedUrl("..")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string controllerPath: sourceDir === "" ? "" : sourceDir + "/bin/localsend-controller"
 
   property bool ready: false
