@@ -8,7 +8,9 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string sourceDir: manifest && manifest.__sourceDir ? String(manifest.__sourceDir) : ""
+  // The shell strips __sourceDir from third-party plugin manifests, so resolve
+  // the plugin root from this file's own loaded URL instead of the manifest.
+  readonly property string sourceDir: decodeURIComponent(Qt.resolvedUrl("../").toString().replace(/^file:\/\//, "").replace(/\/+$/, ""))
   readonly property string controllerPath: sourceDir === "" ? "" : sourceDir + "/bin/localsend-controller"
 
   property bool ready: false
