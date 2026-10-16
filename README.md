@@ -118,3 +118,20 @@ The Rust controller uses LocalSend's official core library at pinned commit `af0
 ## License
 
 MIT. LocalSend and the Rust dependencies retain their respective licenses.
+
+## File-manager integration
+
+File managers can load a selection into the bar panel without starting another
+LocalSend receiver. The user still chooses the destination and starts the transfer.
+
+```bash
+omarchy-shell bredda.localsend selectPaths '{"paths":["/absolute/path/to/file","/absolute/path/to/folder"]}'
+```
+
+The argument is a JSON object containing a nonempty `paths` array of absolute
+paths. The method returns `ok` after loading the selection and opening the panel,
+or a readable error without replacing the current selection. Callers must check
+the reply as well as the command exit status. They should check that selected
+paths exist and are readable before calling. No transfer begins from this call.
+
+Run the IPC selection checks with `node scripts/test-selection.mjs`.
