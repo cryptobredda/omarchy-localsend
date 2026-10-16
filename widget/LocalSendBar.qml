@@ -107,6 +107,24 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): string { if (root.localsend) root.localsend.refresh(); return "ok" }
+    function selectPaths(payload: string): string {
+      if (!root.localsend || !root.localsend.ready) return "LocalSend receiver is not ready"
+      var paths
+      try { paths = JSON.parse(payload).paths } catch (error) { return "Invalid file selection" }
+      if (!Array.isArray(paths) || paths.length === 0) return "No files selected"
+      for (var i = 0; i < paths.length; i++) {
+        if (typeof paths[i] !== "string" || paths[i].charAt(0) !== "/" || paths[i].indexOf("\u0000") !== -1)
+          return "Invalid file path"
+      }
+      root.localsend.selectedPaths = paths
+      root.localsend.payloadKind = "files"
+      root.localsend.payloadLabel = paths.length === 1
+        ? root.localsend.baseName(paths[0]) : paths.length + " items selected"
+      root.localsend.lastError = ""
+      root.localsend.actionStatus = "Choose a nearby device"
+      root.open()
+      return "ok"
+    }
   }
 
   BarIconButton {
